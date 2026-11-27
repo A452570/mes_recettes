@@ -49,8 +49,11 @@ object RecipeImporter {
             val recipeJson = findRecipe(node) ?: continue
             return toRecipe(recipeJson, url)
         }
+        // Pas de données structurées : on analyse le texte visible de la page.
+        RecipeTextParser.parsePage(PageTextExtractor.lines(html), PageTextExtractor.title(html))
+            ?.let { return it.copy(sourceUrl = url) }
         throw ImportException(
-            "Aucune recette trouvée sur cette page. Le site n'utilise peut-être pas de données structurées."
+            "Aucune recette trouvée sur cette page. Utilise « Coller du texte » avec la recette copiée."
         )
     }
 

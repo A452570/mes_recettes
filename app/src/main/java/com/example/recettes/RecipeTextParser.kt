@@ -121,6 +121,31 @@ object RecipeTextParser {
         }
     }
 
+    private val pageStop = Regex(
+        "^(commentaires?|laisser un commentaire|laissez un commentaire|partager|partagez|share|vous aimerez aussi|" +
+            "articles? (similaires|recommandes?|precedents?|suivants?)|recettes? (similaires|a decouvrir|precedentes?)|" +
+            "a lire aussi|newsletter|inscri|publicite|navigation|suivez|abonnez)"
+    )
+    private val pageMeta = Regex("^(preparation|cuisson|temps|duree|pour \\d|\\d+ (personnes|portions|parts))")
+
+    /**
+     * Texte visible d'une page web (une ligne par bloc) : on repart de la rubrique « Ingrédients »,
+     * on garde les durées juste avant, et on s'arrête aux commentaires / partages.
+     * Retourne null si aucune rubrique d'ingrédients n'est trouvée.
+     */
+    fun parsePage(pageLines: List<String>, pageTitle: String): Recipe? {
+        val lines = pageLines.map { it.replace(Regex("\\s+"), " ").trim() }.filter { it.isNotEmpty() && it != "-" }
+        val idx = lines.indexOfFirst { headerOf(it) == Section.INGREDIENTS }
+        if (idx == -1 || lines.size - idx < 3) return null
+        val before = lines.subList(maxOf(0, idx - 12), idx).filter { it.length <= 60 && pageMeta.containsMatchIn(norm(it)) }
+        var after = lines.subList(idx, lines.size)
+        val stop = after.withIndex().indexOfFirst { (i, l) -> i > 0 && l.length <= 60 && pageStop.containsMatchIn(norm(l)) }
+        if (stop > 0) after = after.subList(0, stop)
+        val recipe = parse((listOf(pageTitle) + before + after).filter { it.isNotBlank() }.joinToString("\n")) ?: return null
+        val title = cleanTitle(pageTitle)
+        return if (title.isNotBlank()) recipe.copy(title = title) else recipe
+    }
+
     /** Retourne null si le texte est vide. */
     fun parse(text: String): Recipe? {
         val lines = text.replace("\r", "").lines().map(::cleanLine).filter { it.isNotEmpty() && !isPromo(it) }
