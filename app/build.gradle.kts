@@ -17,9 +17,24 @@ android {
         versionName = "1.0"
     }
 
+    // Clé de signature stable (fournie par les secrets GitHub) : indispensable pour que
+    // les mises à jour s'installent par-dessus la version précédente (Obtainium, etc.).
+    val keystorePath = System.getenv("KEYSTORE_FILE")
+    signingConfigs {
+        if (keystorePath != null) {
+            create("release") {
+                storeFile = file(keystorePath)
+                storePassword = System.getenv("KEYSTORE_PASSWORD")
+                keyAlias = System.getenv("KEY_ALIAS")
+                keyPassword = System.getenv("KEYSTORE_PASSWORD")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false
+            if (keystorePath != null) signingConfig = signingConfigs.getByName("release")
         }
     }
 
