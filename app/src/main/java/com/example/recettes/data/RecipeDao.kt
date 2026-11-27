@@ -31,6 +31,13 @@ interface RecipeDao {
     @Query("SELECT COUNT(*) FROM recipes WHERE sourceUrl != '' AND sourceUrl = :url")
     suspend fun countBySource(url: String): Int
 
+    @Query("SELECT DISTINCT category FROM recipes WHERE category != ''")
+    fun usedCategories(): Flow<List<String>>
+
+    /** Renomme une catégorie (to = "" pour la retirer des recettes). */
+    @Query("UPDATE recipes SET category = :to WHERE category = :from COLLATE NOCASE")
+    suspend fun renameCategory(from: String, to: String)
+
     @Insert
     suspend fun insert(recipe: Recipe): Long
 

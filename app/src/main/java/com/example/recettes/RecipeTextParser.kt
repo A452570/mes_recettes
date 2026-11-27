@@ -15,12 +15,15 @@ object RecipeTextParser {
 
     private val ingredientTitles = setOf(
         "ingredients", "ingredient", "liste des ingredients", "il vous faut",
-        "vous aurez besoin de", "what you need"
+        "vous aurez besoin de", "what you need", "les ingredients", "ingredients necessaires",
+        "il te faut", "tu auras besoin de", "tu as besoin de", "vous avez besoin de"
     )
     private val stepTitles = setOf(
         "preparation", "la preparation", "preparation de la recette", "recette", "realisation",
         "etapes", "etapes de preparation", "etapes de la recette", "instructions", "methode",
-        "procedure", "deroulement", "directions", "method", "steps", "how to make it"
+        "procedure", "deroulement", "directions", "method", "steps", "how to make it",
+        "prepa", "preparations", "etape", "les etapes", "etapes a suivre", "la recette",
+        "marche a suivre", "mode operatoire"
     )
 
     private val bullet = Regex("""^([•·▪◦✓☐]\s*|[-–*]\s+)""")
@@ -41,6 +44,68 @@ object RecipeTextParser {
         """^(pour\s+)?\d+\s*(personnes?|pers|portions?|parts?|convives?|couverts)\W*$|^(portions?|nombre de personnes|serves|servings)\s*:?\s*\d+\W*$"""
     )
 
+    // ---- Nettoyage des légendes de réseaux sociaux (emojis, hashtags, promo, accroche) ----
+
+    private val bulletEmoji = Regex("""^[ \t]*(?:(?:✅|✔|☑|▪|🔸|🔹|🔶|🔷|👉|➡|▶|●|○)\uFE0F?[ \t]*)+""")
+    private val keycap = Regex("""(\d)\uFE0F?\u20E3""")
+    private val hashtag = Regex("""(^|\s)#\p{L}[\p{L}\p{N}_]*""")
+    private val mention = Regex("""(^|\s)@[\p{L}\p{N}_.]+""")
+    private val promo = Regex(
+        """abonne[zr]?(-|\s)?(toi|vous)|suis[- ]moi|suivez|follow|lien en bio|link in bio|commente[zr]?\b|\blike[zr]?\b|likez|n'oublie[zs]? pas|partage[zr]? (cette|ce|la|le|avec)|sauvegarde[zr]? (cette|ce|la|le)|enregistre[zr]? (cette|ce|la|le)|dis[- ]moi en commentaire|identifie|\btag\b|cliquez? sur|\bdm\b|bon appetit|bonne degustation|bonne cuisine"""
+    )
+    private val teaserStart = Regex(
+        """^(voici|voila|decouvr|aujourd|ce soir|qui veut|tu |vous |je |j'|on |bonjour|salut|hello|coucou|regarde|venez|viens|le secret|mon secret|astuce|essaye|testez|teste )"""
+    )
+
+    private fun isEmojiCp(cp: Int): Boolean =
+        cp in 0x1F000..0x1FAFF || cp in 0x2300..0x23FF || cp in 0x2B00..0x2BFF ||
+            (cp in 0x2600..0x27BF && cp != 0x2713 && cp != 0x2610) ||
+            cp == 0xFE0F || cp == 0x200D || cp == 0x20E3
+
+    private fun stripEmojis(s: String): String {
+        val sb = StringBuilder()
+        var i = 0
+        while (i < s.length) {
+            val cp = s.codePointAt(i)
+            if (isEmojiCp(cp)) sb.append(' ') else sb.appendCodePoint(cp)
+            i += Character.charCount(cp)
+        }
+        return sb.toString()
+    }
+
+    private fun cleanLine(raw: String): String {
+        var line = raw.replace(keycap, "$1. ")
+        if (bulletEmoji.containsMatchIn(line)) line = line.replace(bulletEmoji, "- ")
+        return stripEmojis(line)
+            .replace(hashtag, " ").replace(mention, " ")
+            .replace(Regex("[ \t]+"), " ").trim()
+    }
+
+    private fun isPromo(line: String): Boolean = line.length <= 140 && promo.containsMatchIn(norm(line))
+
+    private fun isTeaser(line: String): Boolean =
+        teaserStart.containsMatchIn(norm(line)) ||
+            ((line.endsWith("!") || line.endsWith("?")) &&
+                !bullet.containsMatchIn(line) && !numberedStep.containsMatchIn(line))
+
+    /** Choisit le titre parmi les premières lignes ; retourne (titre, lignes restantes). */
+    private fun pickTitle(head: List<String>): Pair<String, List<String>> {
+        // Les phrases d'accroche du début ("Voici ma recette !") sont écartées.
+        var pool = head.filterIndexed { i, l -> !(i < 3 && isTeaser(l)) }
+        if (pool.isEmpty()) pool = head
+        var best = -1
+        var bestScore = Double.MAX_VALUE
+        pool.take(4).forEachIndexed { i, l ->
+            if (!looksLikeTitle(l)) return@forEachIndexed
+            val words = l.split(Regex("\\s+")).size
+            val score = i * 0.5 + (if (words > 8) 2 else 0) + (if (l.contains(':')) 1 else 0) + words / 20.0
+            if (score < bestScore) { bestScore = score; best = i }
+        }
+        if (best == -1) return "" to pool
+        // Ce qui précède le titre est de l'accroche : on l'écarte.
+        return cleanTitle(pool[best]) to pool.drop(best + 1)
+    }
+
     private class Meta {
         var total = ""
         var prep = ""
@@ -58,7 +123,7 @@ object RecipeTextParser {
 
     /** Retourne null si le texte est vide. */
     fun parse(text: String): Recipe? {
-        val lines = text.replace("\r", "").lines().map { it.trim() }.filter { it.isNotEmpty() }
+        val lines = text.replace("\r", "").lines().map(::cleanLine).filter { it.isNotEmpty() && !isPromo(it) }
         if (lines.isEmpty()) return null
 
         val meta = Meta()
@@ -84,12 +149,7 @@ object RecipeTextParser {
             }
         }
 
-        var title = ""
-        var rest: List<String> = head
-        if (head.isNotEmpty() && looksLikeTitle(head[0])) {
-            title = cleanTitle(head[0])
-            rest = head.drop(1)
-        }
+        val (title, rest) = pickTitle(head)
 
         val notes = mutableListOf<String>()
         if (!hasHeaders) {
@@ -151,7 +211,10 @@ object RecipeTextParser {
         return when (core) {
             in ingredientTitles -> Section.INGREDIENTS
             in stepTitles -> Section.STEPS
-            else -> null
+            else ->
+                // Variantes : "Ingrédients nécessaires pour la pâte", "Ingrédient (4 pers)"…
+                if (core.startsWith("ingredient") && core.split(" ").size <= 4 && line.none { it.isDigit() }) Section.INGREDIENTS
+                else null
         }
     }
 
@@ -205,10 +268,13 @@ object RecipeTextParser {
 
     // ---------------------------------------------------------------- nettoyage
 
-    private fun cleanTitle(line: String): String =
-        line.replace(Regex("^(titre|nom|recette)\\s*:\\s*", RegexOption.IGNORE_CASE), "")
+    private fun cleanTitle(line: String): String {
+        val t = line.replace(Regex("^(titre|nom|recette)\\s*:\\s*", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("^(la |ma |ta |notre )?recette (de |du |des |d')\\s*", RegexOption.IGNORE_CASE), "")
             .trim('#', '*', '_', ' ')
             .trim()
+        return t.replaceFirstChar { it.uppercase() }
+    }
 
     private fun cleanIngredient(line: String): String = line.replace(bullet, "").trim()
 

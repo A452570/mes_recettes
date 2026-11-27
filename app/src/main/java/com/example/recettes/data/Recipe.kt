@@ -14,5 +14,7 @@ data class Recipe(
     val sourceUrl: String = "",
     val totalTime: String = "",
     val servings: String = "",
+    /** Catégorie choisie dans la liste gérée par l'utilisateur ("" = aucune). */
+    val category: String = "",
     val createdAt: Long = System.currentTimeMillis()
 )

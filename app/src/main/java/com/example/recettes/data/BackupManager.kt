@@ -10,7 +10,9 @@ object BackupManager {
 
     class BackupException(message: String) : Exception(message)
 
-    fun toJson(recipes: List<Recipe>): String {
+    class BackupData(val recipes: List<Recipe>, val categories: List<String>)
+
+    fun toJson(recipes: List<Recipe>, categories: List<String> = emptyList()): String {
         val array = JSONArray()
         recipes.forEach { r ->
             array.put(
@@ -21,6 +23,7 @@ object BackupManager {
                     put("sourceUrl", r.sourceUrl)
                     put("totalTime", r.totalTime)
                     put("servings", r.servings)
+                    put("category", r.category)
                     put("createdAt", r.createdAt)
                 }
             )
@@ -29,12 +32,13 @@ object BackupManager {
             put("app", "recettes")
             put("version", FORMAT_VERSION)
             put("exportedAt", System.currentTimeMillis())
+            put("categories", JSONArray(categories))
             put("recipes", array)
         }.toString(2)
     }
 
     /** Les recettes retournées ont toujours id = 0 : Room leur attribuera de nouveaux identifiants. */
-    fun fromJson(text: String): List<Recipe> {
+    fun fromJson(text: String): BackupData {
         val root = try {
             JSONObject(text.trim().removePrefix("﻿"))
         } catch (e: Exception) {
@@ -58,9 +62,14 @@ object BackupManager {
                 sourceUrl = o.optString("sourceUrl"),
                 totalTime = o.optString("totalTime"),
                 servings = o.optString("servings"),
+                category = o.optString("category").trim(),
                 createdAt = o.optLong("createdAt", System.currentTimeMillis())
             )
         }
-        return result
+        val categories = mutableListOf<String>()
+        root.optJSONArray("categories")?.let { a ->
+            for (i in 0 until a.length()) a.optString(i).trim().takeIf { it.isNotEmpty() }?.let(categories::add)
+        }
+        return BackupData(result, categories)
     }
 }

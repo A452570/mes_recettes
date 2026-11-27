@@ -26,6 +26,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.material3.FilterChip
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -127,6 +129,11 @@ fun RecipeApp(vm: RecipeViewModel) {
 fun ListScreen(vm: RecipeViewModel) {
     val recipes by vm.recipes.collectAsStateWithLifecycle()
     val query by vm.query.collectAsStateWithLifecycle()
+    val categories by vm.categories.collectAsStateWithLifecycle()
+    val filter by vm.categoryFilter.collectAsStateWithLifecycle()
+    val sort by vm.sortMode.collectAsStateWithLifecycle()
+    var sortMenuOpen by remember { mutableStateOf(false) }
+    var showCategories by rememberSaveable { mutableStateOf(false) }
     var showImportDialog by rememberSaveable { mutableStateOf(false) }
     var showTextDialog by rememberSaveable { mutableStateOf(false) }
     var menuOpen by remember { mutableStateOf(false) }
@@ -157,8 +164,15 @@ fun ListScreen(vm: RecipeViewModel) {
             title = { Text("Mes recettes") },
             actions = {
                 Box {
-                    TextButton(onClick = { menuOpen = true }) { Text("Sauvegarde ▾") }
+                    TextButton(onClick = { menuOpen = true }) { Text("Menu ▾") }
                     DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+                        DropdownMenuItem(
+                            text = { Text("Gérer les catégories") },
+                            onClick = {
+                                menuOpen = false
+                                showCategories = true
+                            }
+                        )
                         DropdownMenuItem(
                             text = { Text("Exporter vers un fichier") },
                             onClick = {
@@ -205,6 +219,49 @@ fun ListScreen(vm: RecipeViewModel) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp)
         )
 
+        if (categories.isNotEmpty() || filter != null) {
+            LazyRow(
+                contentPadding = PaddingValues(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                item {
+                    FilterChip(
+                        selected = filter == null,
+                        onClick = { vm.setCategoryFilter(null) },
+                        label = { Text("Toutes") }
+                    )
+                }
+                items(categories) { c ->
+                    val selected = filter.equals(c, true)
+                    FilterChip(
+                        selected = selected,
+                        onClick = { vm.setCategoryFilter(if (selected) null else c) },
+                        label = { Text(c) }
+                    )
+                }
+                item {
+                    FilterChip(
+                        selected = filter == "",
+                        onClick = { vm.setCategoryFilter(if (filter == "") null else "") },
+                        label = { Text("Sans catégorie") }
+                    )
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp), horizontalArrangement = Arrangement.End) {
+            Box {
+                TextButton(onClick = { sortMenuOpen = true }) { Text("Tri : ${sort.label} ▾") }
+                DropdownMenu(expanded = sortMenuOpen, onDismissRequest = { sortMenuOpen = false }) {
+                    SortMode.entries.forEach { mode ->
+                        DropdownMenuItem(
+                            text = { Text(mode.label) },
+                            onClick = { vm.setSortMode(mode); sortMenuOpen = false }
+                        )
+                    }
+                }
+            }
+        }
+
         if (vm.importing) {
             Row(
                 Modifier.fillMaxWidth().padding(16.dp),
@@ -218,7 +275,8 @@ fun ListScreen(vm: RecipeViewModel) {
 
         if (recipes.isEmpty() && !vm.importing) {
             Text(
-                if (query.isBlank())
+                if (query.isBlank() && filter != null) "Aucune recette dans cette catégorie."
+                else if (query.isBlank())
                     "Aucune recette pour l'instant.\nImporte-en une depuis un lien, ou partage un lien vers cette appli depuis ton navigateur."
                 else "Aucun résultat.",
                 modifier = Modifier.padding(24.dp),
@@ -237,7 +295,7 @@ fun ListScreen(vm: RecipeViewModel) {
                 ) {
                     Column(Modifier.padding(16.dp)) {
                         Text(recipe.title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                        val meta = listOf(recipe.totalTime, recipe.servings).filter { it.isNotBlank() }
+                        val meta = listOf(recipe.category, recipe.totalTime, recipe.servings).filter { it.isNotBlank() }
                         if (meta.isNotEmpty()) {
                             Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodySmall)
                         }
@@ -284,6 +342,8 @@ fun ListScreen(vm: RecipeViewModel) {
             ) { Text("Saisie manuelle") }
         }
     }
+
+    if (showCategories) CategoriesDialog(vm) { showCategories = false }
 
     if (showTextDialog) {
         var text by rememberSaveable { mutableStateOf("") }
@@ -365,7 +425,7 @@ fun DetailScreen(vm: RecipeViewModel, id: Long) {
         if (r == null) return@Column
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
-            val meta = listOf(r.totalTime, r.servings).filter { it.isNotBlank() }
+            val meta = listOf(r.category, r.totalTime, r.servings).filter { it.isNotBlank() }
             if (meta.isNotEmpty()) Text(meta.joinToString(" · "), style = MaterialTheme.typography.bodyMedium)
 
             Spacer(Modifier.height(16.dp))
@@ -382,7 +442,16 @@ fun DetailScreen(vm: RecipeViewModel, id: Long) {
 
             if (r.sourceUrl.isNotBlank()) {
                 Spacer(Modifier.height(16.dp))
-                Text("Source : ${r.sourceUrl}", style = MaterialTheme.typography.bodySmall)
+                val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
+                val isLink = r.sourceUrl.startsWith("http://", true) || r.sourceUrl.startsWith("https://", true)
+                Text(
+                    "Source : ${r.sourceUrl}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isLink) MaterialTheme.colorScheme.primary else androidx.compose.ui.graphics.Color.Unspecified,
+                    modifier = if (isLink) Modifier.clickable {
+                        runCatching { uriHandler.openUri(r.sourceUrl) }
+                    } else Modifier
+                )
             }
         }
 
@@ -440,9 +509,25 @@ fun EditScreen(vm: RecipeViewModel, screen: Screen.Edit) {
         var instructions by remember(base) { mutableStateOf(base?.instructions.orEmpty()) }
         var time by remember(base) { mutableStateOf(base?.totalTime.orEmpty()) }
         var servings by remember(base) { mutableStateOf(base?.servings.orEmpty()) }
+        var source by remember(base) { mutableStateOf(base?.sourceUrl.orEmpty()) }
+        var category by remember(base) { mutableStateOf(base?.category.orEmpty()) }
+        var catMenu by remember { mutableStateOf(false) }
+        val categories by vm.categories.collectAsStateWithLifecycle()
 
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp)) {
             OutlinedTextField(title, { title = it }, label = { Text("Titre") }, modifier = Modifier.fillMaxWidth())
+            Spacer(Modifier.height(8.dp))
+            Box {
+                OutlinedButton(onClick = { catMenu = true }, modifier = Modifier.fillMaxWidth()) {
+                    Text("Catégorie : ${category.ifBlank { "aucune" }} ▾")
+                }
+                DropdownMenu(expanded = catMenu, onDismissRequest = { catMenu = false }) {
+                    DropdownMenuItem(text = { Text("Aucune") }, onClick = { category = ""; catMenu = false })
+                    categories.forEach { c ->
+                        DropdownMenuItem(text = { Text(c) }, onClick = { category = c; catMenu = false })
+                    }
+                }
+            }
             Spacer(Modifier.height(8.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(time, { time = it }, label = { Text("Durée") }, modifier = Modifier.weight(1f), singleLine = true)
@@ -460,6 +545,12 @@ fun EditScreen(vm: RecipeViewModel, screen: Screen.Edit) {
                 label = { Text("Étapes (une par ligne)") },
                 modifier = Modifier.fillMaxWidth(), minLines = 6
             )
+            Spacer(Modifier.height(8.dp))
+            OutlinedTextField(
+                source, { source = it },
+                label = { Text("Source (lien ou référence)") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true
+            )
         }
 
         Button(
@@ -472,6 +563,8 @@ fun EditScreen(vm: RecipeViewModel, screen: Screen.Edit) {
                         instructions = instructions.trim(),
                         totalTime = time.trim(),
                         servings = servings.trim(),
+                        sourceUrl = source.trim(),
+                        category = category,
                         // Pour un brouillon importé, id reste à 0 → insertion ; sinon mise à jour.
                         id = if (screen.id == null) 0 else screen.id
                     )
@@ -479,5 +572,76 @@ fun EditScreen(vm: RecipeViewModel, screen: Screen.Edit) {
             },
             modifier = Modifier.fillMaxWidth().padding(16.dp)
         ) { Text("Enregistrer") }
+    }
+}
+
+
+// ---------------------------------------------------------------- Gestion des catégories
+
+@Composable
+fun CategoriesDialog(vm: RecipeViewModel, onDismiss: () -> Unit) {
+    val categories by vm.categories.collectAsStateWithLifecycle()
+    var newName by remember { mutableStateOf("") }
+    var renaming by remember { mutableStateOf<String?>(null) }
+    var renameText by remember { mutableStateOf("") }
+    var deleting by remember { mutableStateOf<String?>(null) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Catégories") },
+        text = {
+            Column(Modifier.verticalScroll(rememberScrollState())) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(
+                        newName, { newName = it },
+                        label = { Text("Nouvelle catégorie") },
+                        singleLine = true, modifier = Modifier.weight(1f)
+                    )
+                    TextButton(
+                        enabled = newName.isNotBlank(),
+                        onClick = { vm.addCategory(newName); newName = "" }
+                    ) { Text("Ajouter") }
+                }
+                Spacer(Modifier.height(8.dp))
+                if (categories.isEmpty()) Text("Aucune catégorie.")
+                categories.forEach { c ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c, Modifier.weight(1f))
+                        TextButton(onClick = { renaming = c; renameText = c }) { Text("Renommer") }
+                        TextButton(onClick = { deleting = c }) { Text("Suppr.") }
+                    }
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onDismiss) { Text("Fermer") } }
+    )
+
+    renaming?.let { old ->
+        AlertDialog(
+            onDismissRequest = { renaming = null },
+            title = { Text("Renommer la catégorie") },
+            text = {
+                OutlinedTextField(renameText, { renameText = it }, singleLine = true, label = { Text("Nom") })
+            },
+            confirmButton = {
+                TextButton(
+                    enabled = renameText.isNotBlank(),
+                    onClick = { vm.renameCategory(old, renameText); renaming = null }
+                ) { Text("Enregistrer") }
+            },
+            dismissButton = { TextButton(onClick = { renaming = null }) { Text("Annuler") } }
+        )
+    }
+
+    deleting?.let { name ->
+        AlertDialog(
+            onDismissRequest = { deleting = null },
+            title = { Text("Supprimer « $name » ?") },
+            text = { Text("Les recettes de cette catégorie ne sont pas supprimées : elles n'auront plus de catégorie.") },
+            confirmButton = {
+                TextButton(onClick = { vm.deleteCategory(name); deleting = null }) { Text("Supprimer") }
+            },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Annuler") } }
+        )
     }
 }

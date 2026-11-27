@@ -18,7 +18,7 @@ Application Kotlin / Jetpack Compose avec base de données locale Room (SQLite).
 - **Partage depuis le navigateur** : dans Chrome, « Partager » → « Mes recettes » lance l'import.
 - **Saisie manuelle**, **modification** et **suppression**.
 - **Recherche** par titre ou ingrédient, consultable hors ligne.
-- **Sauvegarde et partage de la base** (menu « Sauvegarde » de l'écran principal) :
+- **Sauvegarde et partage de la base** (menu « Menu » de l'écran principal) :
   - *Exporter vers un fichier* : crée un fichier `recettes-AAAA-MM-JJ.json` à l'endroit choisi
     (stockage du téléphone, Google Drive…).
   - *Partager mes recettes* : envoie ce même fichier vers une autre appli (messagerie, e-mail…).
@@ -55,3 +55,11 @@ Colle (ou partage vers l'appli) le lien d'un reel ou d'une vidéo Facebook : l'a
 étapes), à relire avant d'enregistrer. Cela ne fonctionne que si la publication est publique
 et que Facebook fournit son aperçu ; sinon, copie la légende dans Facebook et utilise
 « Coller du texte ». Les recettes dites uniquement à l'oral dans la vidéo ne sont pas lues.
+
+## Catégories
+
+Chaque recette peut avoir une **catégorie** (Entrée, Plat, Dessert… choisie dans le formulaire).
+Menu ▾ → **Gérer les catégories** : ajouter, renommer (les recettes suivent) ou supprimer
+(les recettes sont conservées, sans catégorie). Sur l'écran principal, touche une catégorie
+pour filtrer, et utilise **Tri** pour classer par date, par titre ou par catégorie. Les catégories
+sont incluses dans les sauvegardes `.json`.

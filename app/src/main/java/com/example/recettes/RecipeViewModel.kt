@@ -1,6 +1,9 @@
 package com.example.recettes
 
 import android.app.Application
+import android.content.Context
+import org.json.JSONArray
+import kotlinx.coroutines.flow.combine
 import android.net.Uri
 import androidx.core.content.FileProvider
 import com.example.recettes.data.BackupManager
@@ -25,6 +28,10 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+enum class SortMode(val label: String) {
+    RECENT("Plus récentes"), TITLE("Titre A→Z"), CATEGORY("Catégorie")
+}
+
 sealed interface Screen {
     data object List : Screen
     data class Detail(val id: Long) : Screen
@@ -41,10 +48,76 @@ class RecipeViewModel(app: Application) : AndroidViewModel(app) {
 
     val query = MutableStateFlow("")
 
+    // ---- Catégories : liste gérée par l'utilisateur (préférences) + celles déjà utilisées ----
+
+    private val prefs = app.getSharedPreferences("recettes_prefs", Context.MODE_PRIVATE)
+    private val storedCategories = MutableStateFlow(loadCategories())
+
+    private fun loadCategories(): List<String> {
+        val raw = prefs.getString("categories", null)
+            ?: return listOf("Entrée", "Plat", "Dessert", "Apéritif", "Boisson")
+        return try {
+            JSONArray(raw).let { a -> (0 until a.length()).map { a.getString(it) } }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun setStoredCategories(list: List<String>) {
+        val clean = list.map { it.trim() }.filter { it.isNotEmpty() }.distinctBy { it.lowercase() }
+        storedCategories.value = clean
+        prefs.edit().putString("categories", JSONArray(clean).toString()).apply()
+    }
+
+    val categories: StateFlow<List<String>> =
+        combine(storedCategories, dao.usedCategories()) { stored, used ->
+            (stored + used).distinctBy { it.lowercase() }.sortedBy { it.lowercase() }
+        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), storedCategories.value)
+
+    /** null = toutes les recettes ; "" = recettes sans catégorie ; sinon le nom de la catégorie. */
+    val categoryFilter = MutableStateFlow<String?>(null)
+    val sortMode = MutableStateFlow(SortMode.RECENT)
+
+    fun setCategoryFilter(value: String?) { categoryFilter.value = value }
+    fun setSortMode(mode: SortMode) { sortMode.value = mode }
+
+    fun addCategory(name: String) = addCategories(listOf(name))
+
+    private fun addCategories(names: List<String>) {
+        setStoredCategories(storedCategories.value + names)
+    }
+
+    fun renameCategory(old: String, newName: String) {
+        val target = newName.trim()
+        if (target.isEmpty() || target == old) return
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { dao.renameCategory(old, target) }
+            setStoredCategories(storedCategories.value.filterNot { it.equals(old, true) } + target)
+            if (categoryFilter.value.equals(old, true)) categoryFilter.value = target
+        }
+    }
+
+    fun deleteCategory(name: String) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) { dao.renameCategory(name, "") }
+            setStoredCategories(storedCategories.value.filterNot { it.equals(name, true) })
+            if (categoryFilter.value.equals(name, true)) categoryFilter.value = null
+        }
+    }
+
     @OptIn(ExperimentalCoroutinesApi::class)
-    val recipes: StateFlow<List<Recipe>> = query
-        .flatMapLatest { dao.search(it.trim()) }
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
+    val recipes: StateFlow<List<Recipe>> = combine(
+        query.flatMapLatest { dao.search(it.trim()) }, categoryFilter, sortMode
+    ) { list, filter, mode ->
+        val filtered = if (filter == null) list else list.filter { it.category.equals(filter, true) }
+        when (mode) {
+            SortMode.RECENT -> filtered
+            SortMode.TITLE -> filtered.sortedBy { it.title.lowercase() }
+            SortMode.CATEGORY -> filtered.sortedWith(
+                compareBy({ it.category.isEmpty() }, { it.category.lowercase() }, { it.title.lowercase() })
+            )
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5_000), emptyList())
 
     var importing by mutableStateOf(false)
         private set
@@ -144,7 +217,7 @@ class RecipeViewModel(app: Application) : AndroidViewModel(app) {
                     val list = dao.all()
                     val out = getApplication<Application>().contentResolver.openOutputStream(uri, "wt")
                         ?: throw IllegalStateException("Fichier inaccessible")
-                    out.use { it.write(BackupManager.toJson(list).toByteArray(Charsets.UTF_8)) }
+                    out.use { it.write(BackupManager.toJson(list, storedCategories.value).toByteArray(Charsets.UTF_8)) }
                     list.size
                 }
                 "Sauvegarde créée : $count recette(s) exportée(s)."
@@ -164,7 +237,9 @@ class RecipeViewModel(app: Application) : AndroidViewModel(app) {
                         ?: throw IllegalStateException("Fichier inaccessible")
                     var added = 0
                     var skipped = 0
-                    for (r in BackupManager.fromJson(text)) {
+                    val data = BackupManager.fromJson(text)
+                    addCategories(data.categories + data.recipes.map { it.category })
+                    for (r in data.recipes) {
                         if (dao.countSame(r.title, r.ingredients) > 0) {
                             skipped++
                         } else {
@@ -190,7 +265,7 @@ class RecipeViewModel(app: Application) : AndroidViewModel(app) {
         val ctx = getApplication<Application>()
         val dir = File(ctx.cacheDir, "exports").apply { mkdirs() }
         val file = File(dir, backupFileName())
-        file.writeText(BackupManager.toJson(list), Charsets.UTF_8)
+        file.writeText(BackupManager.toJson(list, storedCategories.value), Charsets.UTF_8)
         FileProvider.getUriForFile(ctx, "${ctx.packageName}.fileprovider", file)
     }
 
