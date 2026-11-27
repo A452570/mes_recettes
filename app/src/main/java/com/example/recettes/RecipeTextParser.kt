@@ -133,7 +133,7 @@ object RecipeTextParser {
      * on garde les durées juste avant, et on s'arrête aux commentaires / partages.
      * Retourne null si aucune rubrique d'ingrédients n'est trouvée.
      */
-    fun parsePage(pageLines: List<String>, pageTitle: String): Recipe? {
+    fun parsePage(pageLines: List<String>, pageTitle: String = ""): Recipe? {
         val lines = pageLines.map { it.replace(Regex("\\s+"), " ").trim() }.filter { it.isNotEmpty() && it != "-" }
         val idx = lines.indexOfFirst { headerOf(it) == Section.INGREDIENTS }
         if (idx == -1 || lines.size - idx < 3) return null
@@ -141,9 +141,26 @@ object RecipeTextParser {
         var after = lines.subList(idx, lines.size)
         val stop = after.withIndex().indexOfFirst { (i, l) -> i > 0 && l.length <= 60 && pageStop.containsMatchIn(norm(l)) }
         if (stop > 0) after = after.subList(0, stop)
-        val recipe = parse((listOf(pageTitle) + before + after).filter { it.isNotBlank() }.joinToString("\n")) ?: return null
-        val title = cleanTitle(pageTitle)
-        return if (title.isNotBlank()) recipe.copy(title = title) else recipe
+        val title = cleanTitle(pageTitle.ifBlank { guessTitle(lines.subList(maxOf(0, idx - 15), idx)) })
+        return parse((listOf(title) + before + after).filter { it.isNotBlank() }.joinToString("\n"))
+    }
+
+    private val notTitle = Regex(
+        "avis|note|facile|difficile|cout|bon marche|moyen|cher|imprimer|sauvegarder|enregistrer|partager|ajouter|connexion|menu|recherche|^\\d|favori"
+    )
+
+    /** Devine le titre dans les lignes qui précèdent « Ingrédients » (texte de page collé). */
+    private fun guessTitle(candidates: List<String>): String = candidates.lastOrNull { l ->
+        val words = l.split(Regex("\\s+")).size
+        l.length in 8..90 && words >= 2 && !l.endsWith(".") &&
+            !pageMeta.containsMatchIn(norm(l)) && !notTitle.containsMatchIn(norm(l)) && !bullet.containsMatchIn(l)
+    } ?: ""
+
+    /** Texte collé : si c'est une page entière (menus, commentaires…), on isole la recette. */
+    fun parsePasted(text: String): Recipe? {
+        val lines = text.replace("\r", "").lines()
+        if (lines.count { it.isNotBlank() } >= 15) parsePage(lines.map(::cleanLine))?.let { return it }
+        return parse(text)
     }
 
     /** Retourne null si le texte est vide. */

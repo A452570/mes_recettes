@@ -196,7 +196,7 @@ class RecipeViewModel(app: Application) : AndroidViewModel(app) {
 
     /** Met en forme un texte collé et ouvre le formulaire pré-rempli pour validation. */
     fun importFromText(text: String) {
-        val recipe = RecipeTextParser.parse(text)
+        val recipe = RecipeTextParser.parsePasted(text)
         if (recipe == null) {
             message = "Le texte est vide : rien à mettre en forme."
             return
