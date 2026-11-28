@@ -31,13 +31,15 @@ object FacebookImporter {
         return hosts.any { host == it || host.endsWith(".$it") }
     }
 
+    fun isInstagramUrl(url: String): Boolean = url.lowercase().let { it.contains("instagram.com") || it.contains("instagr.am") }
+
     /** À appeler hors du thread principal. */
     fun importFromUrl(rawUrl: String): Recipe {
         var url = rawUrl.trim()
         if (!url.contains("://")) url = "https://$url"
 
         val html = RecipeImporter.download(url, PREVIEW_AGENT)
-        val caption = extractCaption(html)
+        val caption = extractCaption(html, metaOnly = isInstagramUrl(url))
         if (caption.isBlank()) {
             throw RecipeImporter.ImportException(
                 "Le site n'a pas donné la légende (publication privée ou page de connexion). " +
@@ -56,11 +58,12 @@ object FacebookImporter {
     private val jsonMessage = Regex(""""(?:message|caption)"\s*:\s*\{\s*"text"\s*:\s*("(?:[^"\\]|\\.)*")""")
 
     /** Retourne la légende la plus complète trouvée dans la page, ou "" si aucune. */
-    internal fun extractCaption(html: String): String {
+    internal fun extractCaption(html: String, metaOnly: Boolean = false): String {
         val candidates = mutableListOf<String>()
 
         // 1. Texte complet dans le JSON embarqué dans la page (le plus long, non tronqué).
-        for (m in jsonMessage.findAll(html)) {
+        // (Pas pour Instagram : le JSON de la page contient aussi les légendes d'autres publications.)
+        if (!metaOnly) for (m in jsonMessage.findAll(html)) {
             runCatching { JSONObject("{\"t\":${m.groupValues[1]}}").getString("t") }
                 .getOrNull()?.takeIf { it.isNotBlank() }?.let(candidates::add)
         }
