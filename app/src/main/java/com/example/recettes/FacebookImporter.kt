@@ -20,7 +20,7 @@ object FacebookImporter {
     // Facebook sert les balises d'aperçu aux robots de partage de liens.
     private const val PREVIEW_AGENT = "facebookexternalhit/1.1 (+http://www.facebook.com/externalhit_uatext.php)"
 
-    private val hosts = listOf("facebook.com", "fb.watch", "fb.com", "fb.me")
+    private val hosts = listOf("facebook.com", "fb.watch", "fb.com", "fb.me", "instagram.com", "instagr.am")
 
     fun isFacebookUrl(url: String): Boolean {
         val host = try {
@@ -40,8 +40,8 @@ object FacebookImporter {
         val caption = extractCaption(html)
         if (caption.isBlank()) {
             throw RecipeImporter.ImportException(
-                "Facebook n'a pas donné la légende de cette vidéo (publication privée ou page de connexion). " +
-                    "Ouvre le reel, copie la légende, puis utilise « Coller du texte »."
+                "Le site n'a pas donné la légende (publication privée ou page de connexion). " +
+                    "Ouvre la publication, copie la légende, puis utilise « Coller du texte »."
             )
         }
         val recipe = RecipeTextParser.parse(caption)
@@ -84,6 +84,9 @@ object FacebookImporter {
 
     /** "1,2 K réactions · 45 commentaires | légende…" → "légende…" */
     private fun stripCounters(text: String): String {
+        // Instagram : « 1 234 likes, 56 comments - pseudo on March 3, 2024: "légende" »
+        val insta = Regex("""(?is)^[\d\s.,KkMm\u00a0\u202f]+(?:likes?|j['’]aime)[^:：]{0,160}?\s[:：]\s*["«“]?(.*?)["»”]?\.?\s*$""")
+        insta.find(text)?.let { return it.groupValues[1] }
         val bar = text.indexOf(" | ")
         if (bar in 1..120 && Regex("""(?i)réaction|reaction|j'aime|likes?|commentaire|comment|vues|views|partage|share""")
                 .containsMatchIn(text.substring(0, bar))
